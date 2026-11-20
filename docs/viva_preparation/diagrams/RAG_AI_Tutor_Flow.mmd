@@ -1,0 +1,50 @@
+sequenceDiagram
+    autonumber
+    actor Student
+    participant UI as AI Tutor UI (src/app/(app)/tutor/page.tsx)
+    participant AIRouter as AI Router (app/routers/ai.py)
+    participant TutorSvc as Tutor Service (app/services/tutor.py)
+    participant Guardrails as Guardrails (app/services/guardrails.py)
+    participant RAG as RAG Service (app/services/rag.py)
+    participant LLM as Gemini LLM Service (app/services/llm.py)
+    participant DB as Vector Store & Auditing (documents, ai_traces)
+
+    Note over RAG, DB: --- Phase A: Document Ingestion (Offline/Admin) ---
+    Note over RAG, DB: Documents -> chunk_text(900 chars, 150 overlap) -> Gemini 768-d Vector -> pgvector HNSW
+
+    Note over Student, DB: --- Phase B: Grounded Retrieval & Generation ---
+    Student->>UI: Enters query: "Explain LRU cache eviction mechanism"
+    UI->>AIRouter: POST /api/v1/ai/tutor/explain {query, topic_id, company_id}
+    AIRouter->>TutorSvc: explain(user_id, query, topic_id, company_id)
+
+    TutorSvc->>Guardrails: clean_input(query, max_chars=800)
+    Note over Guardrails: Strips prompt injection attempts,<br/>checks for jailbreak patterns,<br/>normalizes unicode text
+    Guardrails-->>TutorSvc: Sanitized Query
+
+    TutorSvc->>RAG: search(query, k=5, topic_ids, company_id)
+    RAG->>LLM: embed([query], task="RETRIEVAL_QUERY")
+    LLM-->>RAG: Query Vector qv (768 dimensions)
+    RAG->>DB: Cosine Distance Search: 1 - (embedding <=> qv)
+    Note over RAG: Re-ranking: +0.05 boost if topic matches,<br/>+0.05 boost if target company matches.<br/>Similarity floor >= 0.55 enforced.
+    DB-->>RAG: Filtered Top-K Chunks [S12, S15, S18]
+    RAG-->>TutorSvc: Top Chunks with metadata & source URIs
+
+    alt No Relevant Chunks Found (Similarity < 0.55)
+        TutorSvc-->>AIRouter: Grounded Refusal: "Knowledge base does not cover this yet." (No hallucination)
+        AIRouter-->>UI: Refusal Message with grounded=False
+    else Relevant Chunks Found
+        TutorSvc->>TutorSvc: Format Prompt with <sources_block> & <student_input>
+        TutorSvc->>LLM: structured(task="explain", schema=ExplainOut, prompt)
+        Note over LLM: Checks per-user daily token budget (150k)<br/>and rate limit (12 req/min).<br/>Calls Gemini API (or Mock fallback).
+        LLM-->>TutorSvc: Raw Pydantic Model (explanation, key_points, example, citations)
+        
+        TutorSvc->>Guardrails: check_citations(citations, chunks)
+        Note over Guardrails: Verifies every cited ref [S#] corresponds<br/>to an actually retrieved source chunk.<br/>Filters ungrounded citations.
+        
+        TutorSvc->>Guardrails: check_output_safety(text_fields)
+        
+        TutorSvc->>DB: INSERT INTO ai_traces (tokens, latency_ms, cost_usd, model, success)
+        
+        TutorSvc-->>AIRouter: Envelope {mode, data, citations, grounded: true, checks}
+        AIRouter-->>UI: 200 OK (Render Markdown Explanation with Verified Citation Chips)
+    end

@@ -1,0 +1,49 @@
+sequenceDiagram
+    autonumber
+    actor Student
+    participant UI as Mock Interview UI (src/app/(app)/interview/page.tsx)
+    participant InterviewRouter as Interview Router (app/routers/interview.py)
+    participant InterviewSvc as Interview Service (app/services/interview.py)
+    participant RAG as RAG Context Search (app/services/rag.py)
+    participant LLM as Gemini LLM Service (Strong Model)
+    participant ReadinessSvc as Readiness Engine (app/services/readiness_data.py)
+    participant DB as Database (interviews, readiness_scores)
+
+    Student->>UI: Selects Company (Amazon), Role (SDE), Type (Technical)
+    UI->>InterviewRouter: POST /api/v1/interviews
+    InterviewRouter->>InterviewSvc: start_interview(user_id, company_id, role, type)
+    InterviewSvc->>RAG: search(company + role + "interview questions", k=2)
+    RAG-->>InterviewSvc: Relevant Interview Context
+    InterviewSvc->>LLM: structured(task="interview_start", schema=OpeningQuestionOut)
+    LLM-->>InterviewSvc: opening_question + topic_focus
+    InterviewSvc->>DB: INSERT INTO interviews (status='in_progress', transcript=[opening])
+    InterviewSvc-->>InterviewRouter: Interview Session Record
+    InterviewRouter-->>UI: Render Opening Question & Active Chat Console
+
+    loop Multi-Turn Interaction (Turns 1 to 4)
+        Student->>UI: Types Written Response & Submits
+        UI->>InterviewRouter: POST /api/v1/interviews/{id}/turn {student_answer}
+        InterviewRouter->>InterviewSvc: submit_turn(user_id, interview_id, answer)
+        InterviewSvc->>InterviewSvc: Append student response to transcript
+        InterviewSvc->>LLM: structured(task="interview_turn", schema=TurnFollowUpOut)
+        Note over LLM: Evaluates previous answer briefly,<br/>synthesizes probing follow-up.<br/>Suggests finish if turn >= 4.
+        LLM-->>InterviewSvc: evaluation_snippet + follow_up_question + suggest_finish
+        InterviewSvc->>DB: Update interviews.transcript
+        InterviewSvc-->>InterviewRouter: Updated Session
+        InterviewRouter-->>UI: Render Follow-Up Question & Evaluation Snippet
+    end
+
+    Student->>UI: Clicks "Finish Interview" (or suggested wrap-up)
+    UI->>InterviewRouter: POST /api/v1/interviews/{id}/finish
+    InterviewRouter->>InterviewSvc: finish_interview(user_id, interview_id)
+    InterviewSvc->>LLM: structured(task="evaluate_interview", schema=InterviewEvaluationOut)
+    Note over LLM: Evaluates 5-Dimension Rubric (Scale 1-10):<br/>1. Technical Knowledge<br/>2. Problem Solving<br/>3. Communication (written)<br/>4. Confidence (written)<br/>5. Concept Accuracy
+    LLM-->>InterviewSvc: Rubric Scores, Strengths, Weaknesses, Recommended Topics, Summary
+    
+    Note over InterviewSvc: Scaled Score Calculation:<br/>avg_score_10 = sum(5 dims) / 5.0<br/>overall_score = avg_score_10 * 10 (Scale 0-100)
+    InterviewSvc->>DB: UPDATE interviews SET status='completed', scores=?, report=?, ended_at=utcnow()
+    
+    Note over ReadinessSvc: Dynamic Feedback Loop:<br/>readiness_data.py reads completed interviews.<br/>Equation 3.1 Interview component = average overall_score!
+    
+    InterviewSvc-->>InterviewRouter: Completed Interview Analysis View
+    InterviewRouter-->>UI: Render 5-Dimension Radar/Scores, Strengths, and Detailed Feedback

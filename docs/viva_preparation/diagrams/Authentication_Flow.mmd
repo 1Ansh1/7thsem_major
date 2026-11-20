@@ -1,0 +1,51 @@
+sequenceDiagram
+    autonumber
+    actor User as Student
+    participant UI as Next.js Frontend (src/lib/api.ts)
+    participant AuthRouter as FastAPI Auth Router (app/routers/auth.py)
+    participant Security as Security Core (app/core/security.py)
+    participant DB as Database (users, roles, sessions)
+
+    Note over User, DB: --- Registration Flow ---
+    User->>UI: Enters email, password, full_name
+    UI->>AuthRouter: POST /api/v1/auth/register
+    AuthRouter->>Security: hash_password(password) using Argon2id
+    Security-->>AuthRouter: password_hash
+    AuthRouter->>DB: INSERT INTO users & profiles (role=student)
+    AuthRouter-->>UI: 201 Created (User details)
+
+    Note over User, DB: --- Login Flow ---
+    User->>UI: Enters email and password
+    UI->>AuthRouter: POST /api/v1/auth/login
+    AuthRouter->>DB: SELECT * FROM users WHERE email = ?
+    AuthRouter->>Security: verify_password(plain, hash)
+    Security-->>AuthRouter: True
+    AuthRouter->>Security: create_access_token(user_id, role, scopes) [15 min]
+    AuthRouter->>Security: create_refresh_token() [14 days]
+    AuthRouter->>DB: INSERT INTO sessions (user_id, family_id, token_hash, expires_at)
+    AuthRouter-->>UI: JSON {access_token, user} + Set-Cookie: refresh_token (httpOnly, path=/api/v1/auth)
+    UI->>UI: Store access_token in memory only
+
+    Note over User, DB: --- Authenticated Request & Auto-Refresh ---
+    User->>UI: Performs action (e.g. view roadmap)
+    UI->>AuthRouter: GET /api/v1/roadmaps/active (Authorization: Bearer <access_token>)
+    alt Access Token Valid
+        AuthRouter->>AuthRouter: Verify JWT signature & scopes ("me")
+        AuthRouter-->>UI: 200 OK (Roadmap Data)
+    else Access Token Expired (401 Unauthorized)
+        AuthRouter-->>UI: 401 Unauthorized
+        UI->>AuthRouter: POST /api/v1/auth/refresh (Cookie: refresh_token)
+        AuthRouter->>DB: Lookup session by token_hash
+        alt Valid Session
+            AuthRouter->>DB: Replace session (mark replaced_by, rotate token)
+            AuthRouter->>Security: Generate new access & refresh token
+            AuthRouter-->>UI: 200 OK {access_token} + Set-Cookie: new refresh_token
+            UI->>UI: Update in-memory token
+            UI->>AuthRouter: Replay GET /api/v1/roadmaps/active (Bearer <new_token>)
+            AuthRouter-->>UI: 200 OK (Roadmap Data)
+        else Token Reuse / Invalid Family
+            AuthRouter->>DB: Revoke entire family_id chain (Breach Mitigation)
+            AuthRouter-->>UI: 401 Unauthorized
+            UI->>UI: Purge token, redirect to /login
+        end
+    end

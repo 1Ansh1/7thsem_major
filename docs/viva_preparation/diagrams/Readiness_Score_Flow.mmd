@@ -1,0 +1,46 @@
+graph TB
+    subgraph RawData ["Stored Application Attempt & Performance Data"]
+        Tree["Skill Graph Nodes<br/>(skills & mastery tables)"]
+        JudgeSubs["Judge0 Submissions<br/>(submissions & verdicts tables)"]
+        MCQSubs["Aptitude Attempts<br/>(submissions table)"]
+        Interviews["Completed Mock Interviews<br/>(interviews table)"]
+        Streak["Active Days & Streak<br/>(profiles & submissions tables)"]
+    end
+
+    subgraph Normalization ["Deterministic Component Normalization (readiness.py)"]
+        DSA_Comp["<b>DSA Component (0.25)</b><br/>0.7 · DSA_Mastery + 0.3 · (DSA_Accepted / DSA_Attempted · 100)"]
+        CSF_Comp["<b>CSF Component (0.20)</b><br/>Weighted Mastery across CSF Areas:<br/>DBMS, OS, Computer Networks, OOP"]
+        Coding_Comp["<b>Coding Component (0.20)</b><br/>70% Accepted Ratio + 30% Mean Solve Speed:<br/>speed = min(1.0, expected_time / actual_time)"]
+        Apt_Comp["<b>Aptitude Component (0.15)</b><br/>Accuracy Ratio:<br/>(Correct Aptitude Answers / Total Answered) · 100"]
+        Interview_Comp["<b>Interview Component (0.10)</b><br/>Average Overall Score (0-100) across<br/>Completed 5-Dimension Rubric Interviews"]
+        Consist_Comp["<b>Consistency Component (0.10)</b><br/>50% Streak (capped at 14d) +<br/>50% Share of Active Days in last 14d"]
+    end
+
+    Tree --> DSA_Comp
+    JudgeSubs --> DSA_Comp
+    Tree --> CSF_Comp
+    JudgeSubs --> Coding_Comp
+    MCQSubs --> Apt_Comp
+    Interviews --> Interview_Comp
+    Streak --> Consist_Comp
+
+    subgraph Equation ["Equation 3.1: Company Readiness Score"]
+        Formula["<b>CRS = 0.25·DSA + 0.20·CSF + 0.20·Coding + 0.15·Aptitude + 0.10·Interview + 0.10·Consistency</b><br/>(Company-specific weight overrides permitted if sum = 1.0)"]
+    end
+
+    DSA_Comp --> Formula
+    CSF_Comp --> Formula
+    Coding_Comp --> Formula
+    Apt_Comp --> Formula
+    Interview_Comp --> Formula
+    Consist_Comp --> Formula
+
+    subgraph OutputAction ["Persistence & Student Feedback"]
+        Snapshot[("readiness_scores Table<br/>(overall, components JSON, weights JSON)")]
+        UI["Student Analytics & Readiness View<br/>(src/app/(app)/readiness/[slug]/page.tsx)"]
+        WorstGap["Rule-Based Recommendation Engine<br/>Identifies largest weighted gap (e.g., Study Graphs or Practice Interview)"]
+    end
+
+    Formula --> Snapshot
+    Formula --> UI
+    Formula --> WorstGap

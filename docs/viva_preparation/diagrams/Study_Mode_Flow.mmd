@@ -1,0 +1,49 @@
+sequenceDiagram
+    autonumber
+    actor Student
+    participant UI as Study Mode UI (src/app/(app)/study/[id]/page.tsx)
+    participant StudyRouter as Study Router (app/routers/study.py)
+    participant ContentSvc as Content Service (app/services/content.py)
+    participant TutorSvc as AI Tutor Service (app/services/tutor.py)
+    participant RAG as RAG Vector Search (app/services/rag.py)
+    participant MasterySvc as Mastery Engine (app/services/mastery.py)
+    participant DB as Database (attempts, submissions, mastery)
+
+    Student->>UI: Selects Topic (e.g., Binary Search Trees)
+    UI->>StudyRouter: POST /api/v1/study/sessions {topic_id}
+    StudyRouter->>DB: Query current skill mastery for topic
+    StudyRouter->>MasterySvc: target_difficulty(current_mastery)
+    MasterySvc-->>StudyRouter: "easy" / "medium" / "hard"
+    StudyRouter->>DB: Fetch diagnostic Question matching topic & difficulty
+    StudyRouter->>DB: Create Attempt record (mode='study', status='in_progress')
+    StudyRouter-->>UI: Step 1: Render Diagnostic Question
+
+    Student->>UI: Submits Answer + Confidence (1-5 scale)
+    UI->>StudyRouter: POST /api/v1/study/sessions/{id}/answer {answer, confidence, time_taken_ms}
+    StudyRouter->>DB: Create Submission & Verdict records
+    StudyRouter-->>UI: Verdict (Correct / Incorrect)
+
+    UI->>StudyRouter: GET /api/v1/study/sessions/{id}/teaching?kind=explanation
+    StudyRouter->>TutorSvc: teach_topic(topic, kind='explanation')
+    TutorSvc->>RAG: search(topic.name, k=4)
+    RAG-->>TutorSvc: Grounded Chunks [S1, S2, ...]
+    TutorSvc->>TutorSvc: Call LLM with ExplainOut schema + Guardrails
+    TutorSvc-->>StudyRouter: Explanation with Key Points & Citations
+    StudyRouter-->>UI: Step 2: Render RAG-Grounded Explanation
+
+    UI->>StudyRouter: GET /api/v1/study/sessions/{id}/teaching?kind=worked_example
+    StudyRouter->>TutorSvc: teach_topic(topic, kind='worked_example')
+    TutorSvc->>RAG: search(topic.name + " worked example", k=4)
+    RAG-->>TutorSvc: Relevant Problem Chunks
+    TutorSvc->>TutorSvc: Call LLM with WorkedExampleOut schema
+    TutorSvc-->>StudyRouter: Worked Example with Step-by-Step Reasoning
+    StudyRouter-->>UI: Step 3: Render Worked Example
+
+    Student->>UI: Completes Follow-Up Mini-Quiz
+    UI->>StudyRouter: POST /api/v1/study/sessions/{id}/complete
+    StudyRouter->>MasterySvc: update_mastery(SkillState, Evidence)
+    Note over MasterySvc: Bayesian/Elo update formula:<br/>delta = lr * w * (target - mastery)<br/>lr = max(0.15, 1/(n+2))<br/>Clipped to ±15.0 pts
+    MasterySvc-->>StudyRouter: Updated SkillState (new mastery_score, accuracy)
+    StudyRouter->>DB: UPSERT INTO mastery TABLE
+    StudyRouter->>DB: Update attempt.status = 'completed'
+    StudyRouter-->>UI: Render Session Summary & New Mastery Bar

@@ -1,0 +1,3 @@
+# Root docker-compose redirecting to major1
+include:
+  - path: ./major1/docker-compose.yml

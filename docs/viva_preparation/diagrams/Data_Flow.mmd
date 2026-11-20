@@ -1,0 +1,40 @@
+sequenceDiagram
+    autonumber
+    actor Student
+    participant Frontend as Frontend UI (Next.js)
+    participant Backend as FastAPI Backend (/api/v1)
+    participant Judge0 as Judge0 CE Sandbox
+    participant DB as Relational DB (dev.db / Postgres)
+    participant RAG as Vector Store (pgvector / HNSW)
+    participant Analytics as Analytics Engine
+
+    Student->>Frontend: Completes Assessment / Practice Session
+    Frontend->>Backend: POST /api/v1/submissions or /tests/.../submit
+    
+    alt Code Submission
+        Backend->>Judge0: Dispatch sandboxed code execution
+        Judge0-->>Backend: Verdict (Accepted / WA / TLE) & execution time
+    end
+
+    Backend->>DB: INSERT / UPDATE submissions & verdicts
+    
+    Note over Backend, DB: --- Step 1: Mastery State Update ---
+    Backend->>Backend: Calculate Bayesian/Elo Mastery Delta (app/services/mastery.py)
+    Backend->>DB: UPSERT INTO mastery (score, accuracy, attempt_count, avg_time)
+    
+    Note over Backend, DB: --- Step 2: Company Readiness Re-computation ---
+    Backend->>Backend: Evaluate Equation 3.1 Components (app/services/readiness_data.py)
+    Backend->>DB: INSERT INTO readiness_scores (overall, components, weights, computed_at)
+    
+    Note over Backend, DB: --- Step 3: Adaptive Roadmap Revision Trigger ---
+    opt If Score < 50% on Topic
+        Backend->>Backend: Recommendation Agent triggered (orchestrator.py)
+        Backend->>DB: UPDATE roadmaps (increment version, insert remedial schedule)
+        Backend->>DB: INSERT INTO recommendations
+    end
+
+    Note over Frontend, Analytics: --- Step 4: Dashboard & Analytics Refresh ---
+    Frontend->>Backend: GET /api/v1/me/analytics?days=30
+    Backend->>DB: Query historical attempts, readiness trends, mastery nodes
+    Backend-->>Frontend: Analytics payload (Accuracy over time, Readiness trends)
+    Frontend->>Frontend: Re-render Recharts visualizations & Progress bars

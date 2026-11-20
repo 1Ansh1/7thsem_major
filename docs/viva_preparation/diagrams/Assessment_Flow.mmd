@@ -1,0 +1,55 @@
+sequenceDiagram
+    autonumber
+    actor Student
+    participant UI as Test Workbench (src/app/(app)/tests/attempt/[id]/page.tsx)
+    participant TestsRouter as Tests Router (app/routers/tests.py)
+    participant GradingSvc as Grading Service (app/services/grading.py)
+    participant JudgeSvc as Judge0 Dispatcher (app/services/judge.py)
+    participant Judge0 as Judge0 CE Sandbox
+    participant MasterySvc as Mastery Engine (app/services/mastery.py)
+    participant ReadinessSvc as Readiness Engine (app/services/readiness_data.py)
+    participant DB as Database (tests, attempts, submissions, verdicts, mastery, readiness_scores)
+
+    Student->>UI: Clicks "Start Test" (e.g. Amazon OA Simulation)
+    UI->>TestsRouter: POST /api/v1/tests/{id}/attempts
+    TestsRouter->>DB: Fetch test sections, duration_seconds, negative_marking
+    TestsRouter->>DB: INSERT INTO attempts (status='in_progress', started_at=utcnow())
+    TestsRouter-->>UI: Test Session State (Questions stripped of answers & hidden tests)
+
+    loop Question Answering & Coding
+        alt MCQ / Theory Answer
+            Student->>UI: Selects option / enters numerical value
+            UI->>TestsRouter: PUT /api/v1/tests/attempts/{attempt_id}/answers {question_id, answer}
+            TestsRouter->>DB: Update attempt.state draft response
+        else Coding Question Submission
+            Student->>UI: Clicks "Run Code" or "Submit Code"
+            UI->>TestsRouter: POST /api/v1/submissions {question_id, code, language, mode}
+            TestsRouter->>DB: INSERT INTO submissions & verdicts (status='queued')
+            TestsRouter->>JudgeSvc: enqueue("judge_submission", sub_id)
+            JudgeSvc->>Judge0: POST /submissions/batch (code, language_id, stdin, expected_output)
+            Judge0-->>JudgeSvc: Batch Tokens
+            loop Poll Verdict
+                JudgeSvc->>Judge0: GET /submissions/batch?tokens=...
+                Judge0-->>JudgeSvc: Status (3: Accepted, 4: WA, 5: TLE, 6: CE, 7: RE)
+            end
+            JudgeSvc->>DB: UPDATE verdicts SET status=?, passed=?, total=?, details=?
+            UI->>TestsRouter: Polling GET /api/v1/submissions/{id}
+            TestsRouter-->>UI: Verdict Update (Real-time Monaco verdict badge)
+        end
+    end
+
+    Note over Student, UI: Timer expires OR Student clicks "Submit Test"
+    UI->>TestsRouter: POST /api/v1/tests/attempts/{attempt_id}/submit
+    TestsRouter->>DB: Fetch all test questions and student submissions
+    TestsRouter->>GradingSvc: grade_attempt(attempt, test_questions)
+    Note over GradingSvc: Calculates score applying marks,<br/>negative marking penalties,<br/>and Judge0 accepted ratios
+    GradingSvc-->>TestsRouter: Final Score & Section Breakdown
+    TestsRouter->>DB: UPDATE attempts SET status='completed', score=?, submitted_at=utcnow()
+    
+    TestsRouter->>MasterySvc: Update mastery for all tested skills
+    MasterySvc->>DB: Update mastery table
+
+    TestsRouter->>ReadinessSvc: report(db, user_id, company, save=True)
+    ReadinessSvc->>DB: INSERT INTO readiness_scores (overall, components, weights)
+    
+    TestsRouter-->>UI: 200 OK (Full Analysis: Score, Percentile, Weakness Breakdown)

@@ -1,0 +1,75 @@
+graph TB
+    subgraph Client ["Frontend Layer (Next.js 15 + React 19 + TypeScript)"]
+        UI["AppShell & Modern UI (Tailwind CSS v4)"]
+        Monaco["Monaco Code Editor (@monaco-editor/react)"]
+        Charts["Analytics & Readiness Visualizations (Recharts)"]
+        AuthClient["Auth Context & In-Memory Token Manager"]
+    end
+
+    subgraph Gateway ["API Gateway & Core Security (FastAPI)"]
+        Router["FastAPI REST Router (/api/v1)"]
+        CORS["CORS Middleware"]
+        AuthMid["JWT Auth & Scoped RBAC Engine (Argon2id + HS256)"]
+        RateLimiter["Rate Limiting & Token Budget Filter"]
+    end
+
+    subgraph CoreServices ["Deterministic Backend Services"]
+        MasterySvc["Mastery Engine (Deterministic Bayesian/Elo Update)"]
+        ReadinessSvc["Company Readiness Engine (Equation 3.1)"]
+        AssessSvc["Assessment & Grading Engine"]
+        StudySvc["Adaptive Study Mode Interaction Loop"]
+        CareerSvc["Career Gap & Deterministic Skill Matcher"]
+        NotifSvc["Notifications & Engagement Engine (XP/Badges/Streak)"]
+    end
+
+    subgraph AIServices ["Generative AI & Agentic Orchestration"]
+        Orchestrator["Multi-Agent Orchestrator (7 Specialized Agents)"]
+        RoadmapEngine["Adaptive Roadmap Engine (Dynamic Plan Revision)"]
+        AITutor["AI Tutor (6 Bounded Modes + Guardrails)"]
+        AICodeReview["AI Code Review (Post-Judge0 Annotation)"]
+        InterviewSvc["Mock Interview System (5-Dimension Rubric)"]
+        Guardrails["AI Guardrails & Pydantic Schema Validator"]
+        LLMClient["Gemini LLM / Embedding Client (with Mock Fallback)"]
+    end
+
+    subgraph AsyncPipeline ["Asynchronous Jobs & Sandboxed Execution"]
+        JobDispatcher["Job Dispatcher (In-Process AsyncIO or Celery)"]
+        RedisQueue[("Redis Broker / Cache")]
+        Judge0["Judge0 CE Sandboxed Code Execution Service"]
+    end
+
+    subgraph DataLayer ["Persistence & Vector Store Layer"]
+        Postgres[("PostgreSQL 16 / SQLite dev.db")]
+        PGVector[("pgvector Vector Store (HNSW Cosine Distance)")]
+        AITraces[("ai_traces Auditing & Cost Store")]
+    end
+
+    UI --> Router
+    Monaco --> Router
+    Charts --> Router
+    AuthClient --> Router
+
+    Router --> CORS
+    CORS --> AuthMid
+    AuthMid --> RateLimiter
+
+    RateLimiter --> CoreServices
+    RateLimiter --> AIServices
+
+    StudySvc --> MasterySvc
+    AssessSvc --> MasterySvc
+    MasterySvc --> ReadinessSvc
+    InterviewSvc --> ReadinessSvc
+
+    AIServices --> Guardrails
+    Guardrails --> LLMClient
+    LLMClient --> AITraces
+
+    CoreServices --> JobDispatcher
+    AIServices --> JobDispatcher
+    JobDispatcher -.-> RedisQueue
+    JobDispatcher --> Judge0
+
+    CoreServices --> Postgres
+    AIServices --> PGVector
+    PGVector --> Postgres
